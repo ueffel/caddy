@@ -15,12 +15,15 @@
 package fileserver
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/caddyconfig"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/caddyserver/caddy/v2/modules/caddyhttp/encode"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp/rewrite"
 )
 
@@ -33,10 +36,11 @@ func init() {
 // server and configures it with this syntax:
 //
 //    file_server [<matcher>] [browse] {
-//        root   <path>
-//	      hide   <files...>
-//	      index  <files...>
-//	      browse [<template_file>]
+//        root        <path>
+//        hide        <files...>
+//        index       <files...>
+//        browse      [<template_file>]
+//        precompress <formats...>
 //    }
 //
 func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
@@ -77,6 +81,26 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 				}
 				fsrv.Browse = new(Browse)
 				h.Args(&fsrv.Browse.TemplateFile)
+			case "precompress":
+				var order []string
+				for h.NextArg() {
+					modID := "http.encoders." + h.Val()
+					mod, err := caddy.GetModule(modID)
+					if err != nil {
+						return nil, h.Errf("getting module named '%s': %v", modID, err)
+					}
+					inst := mod.New()
+					precompress, ok := inst.(encode.Precompress)
+					if !ok {
+						return nil, fmt.Errorf("module %s is not an HTTP encoding; is %T", modID, inst)
+					}
+					if fsrv.EncodingsRaw == nil {
+						fsrv.EncodingsRaw = make(caddy.ModuleMap)
+					}
+					fsrv.EncodingsRaw[h.Val()] = caddyconfig.JSON(precompress, nil)
+					order = append(order, h.Val())
+				}
+				fsrv.PrecompressOrder = order
 			default:
 				return nil, h.Errf("unknown subdirective '%s'", h.Val())
 			}
